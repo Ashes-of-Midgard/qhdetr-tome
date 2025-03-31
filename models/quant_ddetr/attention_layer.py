@@ -150,18 +150,24 @@ def multi_head_attention_forward(query: Tensor,
 
         if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
+            in_proj_weight = in_proj.qw(in_proj.weight)
+            in_proj_bias = in_proj.bias
+            query = qf_act(query)
             
             q, k, v = F.linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
         elif torch.equal(key, value):
             # encoder-decoder attention
             # This is inline in_proj function with in_proj_weight and in_proj_bias
+            in_proj_weight = in_proj.qw(in_proj.weight)
+            in_proj_bias = in_proj.bias
             _b = in_proj_bias
             _start = 0
             _end = embed_dim
             _w = in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
+            query = qf_act(query)
             q = F.linear(query, _w, _b)
 
             if key is None:
@@ -176,6 +182,7 @@ def multi_head_attention_forward(query: Tensor,
                 _w = in_proj_weight[_start:, :]
                 if _b is not None:
                     _b = _b[_start:]
+                key = kf_act(key)
                 k, v = F.linear(key, _w, _b).chunk(2, dim=-1)
 
         else:
@@ -408,9 +415,9 @@ class QuantMultiheadAttention(nn.Module):
         self.v_act = ActLSQ(nbits_a=4, in_features=num_heads)
         self.attn_act = ActLSQ(nbits_a=4, in_features=num_heads)
 
-        self.qf_act = ActLSQ(nbits_a=4, in_features=embed_dim)
-        self.kf_act = ActLSQ(nbits_a=4, in_features=embed_dim)
-        self.vf_act = ActLSQ(nbits_a=4, in_features=embed_dim)
+        self.qf_act = ActLSQ(nbits_a=4, in_features=num_heads)
+        self.kf_act = ActLSQ(nbits_a=4, in_features=num_heads)
+        self.vf_act = ActLSQ(nbits_a=4, in_features=num_heads)
 
 
         self.in_proj = LinearLSQ(embed_dim, embed_dim * 3, nbits_w = n_bit, bias=True)

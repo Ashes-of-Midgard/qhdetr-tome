@@ -125,9 +125,7 @@ def train_one_epoch(
     for i in metric_logger.log_every(range(len(data_loader)), print_freq, header):
 
         # pdb.set_trace()
-        with torch.cuda.amp.autocast() if use_fp16 else torch.cuda.amp.autocast(
-            enabled=False
-        ):
+        with torch.amp.autocast("cuda") if use_fp16 else torch.amp.autocast("cuda", enabled=False):
             if use_fp16:
                 optimizer.zero_grad()
 

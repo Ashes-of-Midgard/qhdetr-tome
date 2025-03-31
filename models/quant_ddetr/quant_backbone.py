@@ -304,7 +304,7 @@ def build_backbone(args):
 
 def load_pretrained_weights(model, weight_path):
     
-    checkpoint = torch.load(weight_path, map_location="cpu")
+    checkpoint = torch.load(weight_path, map_location="cpu", weights_only=False)
 
     checkpoint = checkpoint["model"]
 
