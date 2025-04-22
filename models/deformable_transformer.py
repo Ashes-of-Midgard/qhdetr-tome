@@ -204,7 +204,8 @@ class DeformableTransformer(nn.Module):
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(self, srcs, masks, pos_embeds, query_embed=None, self_attn_mask=None):
 
         # prepare input for encoder
@@ -367,7 +368,7 @@ class DeformableTransformerEncoderLayer(nn.Module):
         src = self.norm2(src)
         return src
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         src,
@@ -419,7 +420,7 @@ class DeformableTransformerEncoder(nn.Module):
         reference_points = reference_points[:, :, None] * valid_ratios[:, None]
         return reference_points
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         src,
@@ -498,7 +499,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = self.norm3(tgt)
         return tgt
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         tgt,
@@ -571,7 +572,7 @@ class DeformableTransformerDecoder(nn.Module):
         # self.roi_align = RoIAlign(output_size=(7, 7), spatial_scale=1.0, sampling_ratio=-1)
 
         
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         tgt,                                # tgt: 预设的query embedding [bs, 300, 256]. 内容查询

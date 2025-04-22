@@ -25,7 +25,7 @@ from datasets.data_prefetcher import data_prefetcher
 import pdb
 import numpy as np
 
-scaler = torch.amp.GradScaler(device='cuda')
+scaler = torch.cuda.amp.GradScaler()
 def lamda_scheduler(start_warmup_value, base_value, epochs, niter_per_ep, warmup_epochs=5):
     warmup_schedule = np.array([])
     warmup_iters = warmup_epochs * niter_per_ep

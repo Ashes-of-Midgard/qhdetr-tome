@@ -198,7 +198,7 @@ class DeformableTransformer(nn.Module):
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(self, srcs, masks, pos_embeds, query_embed=None, self_attn_mask=None):
 
         # prepare input for encoder
@@ -353,7 +353,7 @@ class DeformableTransformerEncoderLayer(nn.Module):
         # return src, None
 
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         src,
@@ -406,7 +406,7 @@ class DeformableTransformerEncoder(nn.Module):
         reference_points = reference_points[:, :, None] * valid_ratios[:, None]
         return reference_points
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         src,
@@ -488,7 +488,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = self.norm3(tgt)
         return tgt
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         tgt,
@@ -548,7 +548,7 @@ class DeformableTransformerDecoder(nn.Module):
         self.bbox_embed = None
         self.class_embed = None
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         tgt,

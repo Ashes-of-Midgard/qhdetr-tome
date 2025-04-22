@@ -24,7 +24,7 @@ import MultiScaleDeformableAttention as MSDA
 
 class MSDeformAttnFunction(Function):
     @staticmethod
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         ctx,
         value,
@@ -54,7 +54,7 @@ class MSDeformAttnFunction(Function):
 
     @staticmethod
     @once_differentiable
-    @torch.amp.custom_bwd(device_type='cuda')
+    @torch.cuda.amp.custom_bwd
     def backward(ctx, grad_output):
         (
             value,

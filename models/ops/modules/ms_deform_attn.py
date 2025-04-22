@@ -94,7 +94,7 @@ class MSDeformAttn(nn.Module):
         xavier_uniform_(self.output_proj.weight.data)
         constant_(self.output_proj.bias.data, 0.0)
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type='cuda')
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(
         self,
         query,
