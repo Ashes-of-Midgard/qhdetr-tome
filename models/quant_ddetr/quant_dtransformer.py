@@ -19,6 +19,7 @@ from torch._jit_internal import boolean_dispatch, List, Optional, _overload, Tup
 from torch.overrides import has_torch_function, handle_torch_function
 from .attention_layer import *
 from .ms_attention_layer import *
+from .merge import *
 import pdb
 
 # sapm
@@ -151,6 +152,7 @@ class DeformableTransformer(nn.Module):
         normal_(self.level_embed)
 
     def get_proposal_pos_embed(self, proposals):
+        # proposals: N, L, 4
         num_pos_feats = 128
         temperature = 10000
         scale = 2 * math.pi
@@ -159,6 +161,7 @@ class DeformableTransformer(nn.Module):
             num_pos_feats, dtype=torch.float32, device=proposals.device
         )
         dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+        # dim_t: [num_pos_feats]
         # N, L, 4
         proposals = proposals.sigmoid() * scale
         # N, L, 4, 128
@@ -167,9 +170,13 @@ class DeformableTransformer(nn.Module):
         pos = torch.stack(
             (pos[:, :, :, 0::2].sin(), pos[:, :, :, 1::2].cos()), dim=4
         ).flatten(2)
+        # N, L, 128*4
         return pos
 
     def gen_encoder_output_proposals(self, memory, memory_padding_mask, spatial_shapes):
+        # memory: N_, S_, C_
+        # memory_padding_mask: N_, S_
+        # spatial_shapes: [[H_, W_], ...], len=num_lvls
         N_, S_, C_ = memory.shape
         base_scale = 4.0
         proposals = []
@@ -178,8 +185,8 @@ class DeformableTransformer(nn.Module):
             mask_flatten_ = memory_padding_mask[:, _cur : (_cur + H_ * W_)].view(
                 N_, H_, W_, 1
             )
-            valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
-            valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
+            valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1) # valid_H: N_, 1, 1
+            valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1) # valid_W: N_, 1, 1
 
             grid_y, grid_x = torch.meshgrid(
                 torch.linspace(
@@ -190,16 +197,19 @@ class DeformableTransformer(nn.Module):
                 ),
             )
             grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1)
-
+            # grid: W_, H_, 2
             scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).view(
                 N_, 1, 1, 2
-            )
+            ) # scale: N_, 1, 1, 2
             grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1) + 0.5) / scale
+            # grid: N_, W_, H_, 2, a normalized meshgrid
             wh = torch.ones_like(grid) * 0.05 * (2.0 ** lvl)
             proposal = torch.cat((grid, wh), -1).view(N_, -1, 4)
+            # proposal: # N_, W_*H_, 4
             proposals.append(proposal)
             _cur += H_ * W_
         output_proposals = torch.cat(proposals, 1)
+        # output_proposals: # N_, S_, 4
         output_proposals_valid = (
             (output_proposals > 0.01) & (output_proposals < 0.99)
         ).all(-1, keepdim=True)
@@ -210,7 +220,7 @@ class DeformableTransformer(nn.Module):
         output_proposals = output_proposals.masked_fill(
             ~output_proposals_valid, float("inf")
         )
-
+        
         output_memory = memory
         output_memory = output_memory.masked_fill(
             memory_padding_mask.unsqueeze(-1), float(0)
@@ -274,6 +284,8 @@ class DeformableTransformer(nn.Module):
             output_memory, output_proposals = self.gen_encoder_output_proposals(
                 memory, mask_flatten, spatial_shapes
             )
+            # output_memory: [N, S, C]
+            # output_proposals: [N, S, 4]
 
             # hack implementation for two-stage Deformable DETR
             enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](
@@ -286,15 +298,19 @@ class DeformableTransformer(nn.Module):
 
             topk = self.two_stage_num_proposals
             topk_proposals = torch.topk(enc_outputs_class[..., 0], topk, dim=1)[1]
+            # topk_proposals: [N, topk]
             topk_coords_unact = torch.gather(
                 enc_outputs_coord_unact, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4)
-            )
+            ) # topk_proposals: [N, topk, 4]
             topk_coords_unact = topk_coords_unact.detach()
+            # topk_coords_uncat: [N, topk, 4]
             reference_points = topk_coords_unact.sigmoid()
+            # reference_points: [N, topk, 4]
             init_reference_out = reference_points
             pos_trans_out = self.pos_trans_norm(
                 self.pos_trans(self.get_proposal_pos_embed(topk_coords_unact))
             )
+            # pos_trans_out: [N, topk, 2*C]
 
             if not self.mixed_selection:
                 query_embed, tgt = torch.split(pos_trans_out, c, dim=2)
@@ -575,7 +591,7 @@ class DeformableTransformerDecoderLayerMerge(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
 
         # merge attention
-        self.merge_attn = QuantMultiheadAttention(d_model, n_heads, n_bit=n_bit, dropout=dropout, dist_align=False)
+        self.merge_attn = Quant_TokenMerging(d_model, 30)
         self.dropout_merge = nn.Dropout(dropout)
         self.norm_merge = nn.LayerNorm(d_model)
 
@@ -636,11 +652,9 @@ class DeformableTransformerDecoderLayerMerge(nn.Module):
         # merge attention
         # tgt: shape=[1, 1800, 256]
         # num_queries = tgt.shape[1]
-        tgt_merged = self.merge_attn(
-            tgt.transpose(0,1),
-            tgt.transpose(0,1),
-            tgt.transpose(0,1)
-        )[0].transpose(0,1)
+        tgt_merged = self.merge_attn(tgt)
+        # merge, _ = bipartite_soft_matching(tgt, r=int(0.5*tgt.shape[1]))
+        # tgt_merged = merge(tgt)
         tgt = tgt + self.dropout_merge(tgt_merged)
         tgt = self.norm_merge(tgt)
 
@@ -754,11 +768,16 @@ class DeformableTransformerDecoder(nn.Module):
         src_padding_mask=None,
         self_attn_mask=None,
     ):
+        # tgt: [N, L, C]
+        # reference_points: [N, L, 4]
+        # src: [N, S, C]
+        # query_pos: [N, L, V]
         output = tgt 
 
         # sapm
         bs, _, channels = query_pos.size()     # [2, 1800, 256]
         features = reverse_restore_feature_maps(src, src_spatial_shapes, bs, channels)  # 逆向恢复 特征图 
+        # features: [[N, C, H_1, W_1], ...]
         # Q_c0_1 = self.sapm_deformable_1(features)  # [2, 300, 256]
         # Q_c0_2 = self.sapm_deformable_2(features)  # [2, 1500, 256]
         # Q_c0 = Q_c0_1 if not self.training else torch.cat((Q_c0_1, Q_c0_2), dim=1)
@@ -800,8 +819,10 @@ class DeformableTransformerDecoder(nn.Module):
                     src_padding_mask,
                     self_attn_mask,
                 )
+                # output: [N, L, C]
 
                 # sapm
+                # outputs_coord: [N, L, 4]
                 outputs_coord = self.box_head(output).sigmoid()  # [2, 300, 256] -> [2, 300, 4]
                 # pooled_features = []
                 # for feature,feature_shape in zip(features,src_spatial_shapes):
@@ -813,9 +834,12 @@ class DeformableTransformerDecoder(nn.Module):
                 # only finel feature
                 # features[3] 1x256x13x19
                 rois = convert_to_rois(outputs_coord,src_spatial_shapes[3]) # [2*300, 5]
+                # rois: [N*L, 5]
                 pooled_feature = self.roi_align(features[3], rois)  # [2*300, 256, 7, 7]
+                # pooled_feature: [N*L, C, 7, 7]
                 
                 Q_c_local = self.sapm_local(pooled_feature).view(bs, -1, channels)
+                # Q_c_local: [N, L, C]
                 # if not torch.all(Q_c_local == 0.0):
                 #     print("++++++++++++++++++")
                 # print(torch.all(Q_c_local == 0.0))
@@ -833,6 +857,7 @@ class DeformableTransformerDecoder(nn.Module):
             # hack implementation for iterative bounding box refinement
             if self.bbox_embed is not None:
                 tmp = self.bbox_embed[lid](output)
+                # tmp: [N, L, 4]
                 if reference_points.shape[-1] == 4:
                     new_reference_points = tmp + inverse_sigmoid(reference_points)
                     new_reference_points = new_reference_points.sigmoid()

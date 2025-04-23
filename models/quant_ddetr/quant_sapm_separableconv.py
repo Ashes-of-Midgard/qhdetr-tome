@@ -141,6 +141,7 @@ class MLP(nn.Module):
         return x
 
 def convert_to_rois(outputs_coord, feature_shape):
+    # outputs_coord: [N, L, 4]
     batch_size, q, _ = outputs_coord.shape
     height, width = feature_shape
 
@@ -160,10 +161,12 @@ def convert_to_rois(outputs_coord, feature_shape):
     y1 = torch.clamp(y1, 0, height)
     x2 = torch.clamp(x2, 0, width)
     y2 = torch.clamp(y2, 0, height)
-
+    # [N, L]
     # 拼接坐标到形状为 [batch_size, 5]
-    rois = torch.stack([x1, y1, x2, y2], dim=-1)
+    rois = torch.stack([x1, y1, x2, y2], dim=-1) # rois: [N, L, 4]
     batch_idx = torch.arange(batch_size, device=outputs_coord.device).view(-1, 1, 1).expand(batch_size, q, 1)
+    # batch_idx: [N, L, 1]
     rois = torch.cat((batch_idx, rois), dim=-1).view(batch_size * q, 5)
+    # rois: [N*L, 5] 第一个索引位置是batch_idx
 
     return rois
