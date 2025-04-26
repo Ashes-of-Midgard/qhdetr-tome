@@ -19,7 +19,6 @@ from torch._jit_internal import boolean_dispatch, List, Optional, _overload, Tup
 from torch.overrides import has_torch_function, handle_torch_function
 from .attention_layer import *
 from .ms_attention_layer import *
-from .merge import *
 import pdb
 
 # sapm
@@ -101,19 +100,8 @@ class DeformableTransformer(nn.Module):
             nhead,
             dec_n_points,
         )
-        decoder_layer_merge = DeformableTransformerDecoderLayerMerge(
-            d_model,
-            n_bit,
-            dim_feedforward,
-            dropout,
-            activation,
-            num_feature_levels,
-            nhead,
-            dec_n_points,
-        )
         self.decoder = DeformableTransformerDecoder(
             decoder_layer,
-            decoder_layer_merge,
             num_decoder_layers,
             return_intermediate_dec,
             look_forward_twice,
@@ -564,104 +552,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = self.forward_ffn(tgt)
 
         return tgt
-
-class DeformableTransformerDecoderLayerMerge(nn.Module):
-    def __init__(
-        self,
-        d_model=256,
-        n_bit=4,
-        d_ffn=1024,
-        dropout=0.1,
-        activation="relu",
-        n_levels=4,
-        n_heads=8,
-        n_points=4,
-    ):
-        super().__init__()
-
-        # cross attention
-        # self.cross_attn = QuantMS_DAttention(d_model, nhead, n_bit=n_bit, dropout=dropout, dist_align=False)
-        self.cross_attn = QuantMS_DAttention(d_model, n_levels, n_heads, n_points, n_bit=n_bit)
-        self.dropout1 = nn.Dropout(dropout)
-        self.norm1 = nn.LayerNorm(d_model)
-
-        # self attention
-        self.self_attn = QuantMultiheadAttention(d_model, n_heads, n_bit=n_bit, dropout=dropout, dist_align=False)
-        self.dropout2 = nn.Dropout(dropout)
-        self.norm2 = nn.LayerNorm(d_model)
-
-        # merge attention
-        self.merge_attn = Quant_TokenMerging(d_model, 30)
-        self.dropout_merge = nn.Dropout(dropout)
-        self.norm_merge = nn.LayerNorm(d_model)
-
-        # ffn
-        self.linear1 = LinearLSQ(d_model, d_ffn, nbits_w=n_bit)
-        self.activation = _get_activation_fn(activation)
-        self.dropout3 = nn.Dropout(dropout)
-        self.linear2 = LinearLSQ(d_ffn, d_model, nbits_w=n_bit)
-        self.dropout4 = nn.Dropout(dropout)
-        self.norm3 = nn.LayerNorm(d_model)
-
-    @staticmethod
-    def with_pos_embed(tensor, pos):
-        return tensor if pos is None else tensor + pos
-
-    def forward_ffn(self, tgt):
-        tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
-        tgt = tgt + self.dropout4(tgt2)
-        tgt = self.norm3(tgt)
-        return tgt
-
-    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
-    def forward(
-        self,
-        tgt,
-        query_pos,
-        reference_points,
-        src,
-        src_spatial_shapes,
-        level_start_index,
-        src_padding_mask=None,
-        self_attn_mask=None
-    ):
-        # self attention
-        q = k = self.with_pos_embed(tgt, query_pos)
-        # q: Tensor, shape=[bs, num_queries, d_model]
-        tgt2 = self.self_attn(
-            q.transpose(0, 1),
-            k.transpose(0, 1),
-            tgt.transpose(0, 1),
-            attn_mask=self_attn_mask,
-        )[0].transpose(0, 1)
-        tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
-
-        # cross attention
-        tgt2 = self.cross_attn(
-            self.with_pos_embed(tgt, query_pos),
-            reference_points,
-            src,
-            src_spatial_shapes,
-            level_start_index,
-            src_padding_mask,
-        )
-        tgt = tgt + self.dropout1(tgt2)
-        tgt = self.norm1(tgt)
-
-        # merge attention
-        # tgt: shape=[1, 1800, 256]
-        # num_queries = tgt.shape[1]
-        tgt_merged = self.merge_attn(tgt)
-        # merge, _ = bipartite_soft_matching(tgt, r=int(0.5*tgt.shape[1]))
-        # tgt_merged = merge(tgt)
-        tgt = tgt + self.dropout_merge(tgt_merged)
-        tgt = self.norm_merge(tgt)
-
-        # ffn
-        tgt = self.forward_ffn(tgt)
-
-        return tgt
+    
 
 # sapm
 def reverse_restore_feature_maps(src, src_spatial_shapes, bs, channels):
@@ -724,7 +615,6 @@ class DeformableTransformerDecoder(nn.Module):
     def __init__(
         self,
         decoder_layer,
-        decoder_layer_merge,
         num_layers,
         return_intermediate=False,
         look_forward_twice=False,
@@ -733,8 +623,7 @@ class DeformableTransformerDecoder(nn.Module):
         super().__init__()
         # self.layers = _get_clones(decoder_layer, num_layers)
         
-        self.layers = _get_clones(decoder_layer, num_layers-1)
-        self.layers.append(copy.deepcopy(decoder_layer_merge))
+        self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.return_intermediate = return_intermediate
         self.look_forward_twice = look_forward_twice
