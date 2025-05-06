@@ -13,8 +13,8 @@ python -u main.py \
     --epochs 25 \
     --lr_drop 10 \
     --weight_decay 0.0 \
-    --num_queries_one2one 30 \
-    --num_queries_one2many 150 \
+    --num_queries_one2one 300 \
+    --num_queries_one2many 1500 \
     --k_one2many 6 \
     --lambda_one2many 1.0 \
     --dropout 0.0 \
