@@ -53,7 +53,7 @@ class OutAggregate(nn.Module):
             for i in range(n_q):
                 aggregation_mask = (~aggregation_mask[:, i, :].unsqueeze(2)) * aggregation_mask
             eye = torch.eye(n_q, dtype=torch.bool, device=aggregation_mask.device).unsqueeze(0)
-            aggregation_mask = aggregation_mask + eye
+            aggregation_mask = (aggregation_mask + eye).to(torch.float32)
         
         aggregated_bboxes = (aggregation_mask @ bboxes) / torch.sum(aggregation_mask, -1, keepdim=True)
         return aggregated_bboxes, logits
