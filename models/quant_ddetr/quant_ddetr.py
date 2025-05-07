@@ -297,8 +297,8 @@ class DeformableDETR(nn.Module):
         outputs_coords_one2many = torch.stack(outputs_coords_one2many)
 
         # Output Aggregation
-        ori_coords = torch.concat(outputs_coords_one2one[-1], outputs_coords_one2many[-1], dim=1)
-        ori_classes = torch.concat(outputs_classes_one2one[-1], outputs_classes_one2many[-1], dim=1)
+        ori_coords = torch.concat([outputs_coords_one2one[-1], outputs_coords_one2many[-1]], dim=1)
+        ori_classes = torch.concat([outputs_classes_one2one[-1], outputs_classes_one2many[-1]], dim=1)
         aggregated_coords, aggregated_classes = self.aggregate(ori_coords, ori_classes)
         # outputs_classes_one2one = [outputs_classes_one2one[i] for i in range(len(outputs_classes_one2one))]
         # outputs_coords_one2one = [outputs_coords_one2one[i] for i in range(len(outputs_coords_one2one))]
