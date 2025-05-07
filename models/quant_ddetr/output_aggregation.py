@@ -32,21 +32,29 @@ def masked_kl_divergence(pred_logits: torch.Tensor, mask: torch.tensor) -> torch
 
 
 class OutAggregate(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, t_b=0.9):
         super().__init__()
         self.num_classes = num_classes
+        self.t_b = t_b
 
     def forward(self, bboxes, logits):
-        iou_matrix = []
-        for i in range(len(bboxes)):
-            iou_matrix.append(box_ops.generalized_box_iou(
-                box_ops.box_cxcywh_to_xyxy(bboxes[i]),
-                box_ops.box_cxcywh_to_xyxy(bboxes[i])
-            ))
-        iou_matrix = torch.stack(iou_matrix)
-        iou_matrix_gt_threshold = iou_matrix > 0.9
+        with torch.no_grad():
+            n_q = bboxes.shape[1]
+            iou_matrix = []
+            for i in range(len(bboxes)):
+                iou_matrix.append(box_ops.generalized_box_iou(
+                    box_ops.box_cxcywh_to_xyxy(bboxes[i]),
+                    box_ops.box_cxcywh_to_xyxy(bboxes[i])
+                ))
+            iou_matrix = torch.stack(iou_matrix)
+            iou_matrix_gt_threshold = iou_matrix > self.t_b
+            upper_triangle_mask = (torch.arange(n_q).unsqueeze(0) > torch.arange(n_q).unsqueeze(1)).unsqueeze(0).to(iou_matrix_gt_threshold.device)
+            aggregation_mask = upper_triangle_mask * iou_matrix_gt_threshold
+            for i in range(n_q):
+                aggregation_mask = (~aggregation_mask[:, i, :].unsqueeze(2)) * aggregation_mask
+            eye = torch.eye(n_q, dtype=torch.bool, device=aggregation_mask.device).unsqueeze(0)
+            aggregation_mask = aggregation_mask + eye
         
-        aggregation_mask = iou_matrix_gt_threshold.to(torch.float32).detach().requires_grad_(False)
         aggregated_bboxes = (aggregation_mask @ bboxes) / torch.sum(aggregation_mask, -1, keepdim=True)
         return aggregated_bboxes, logits
         
