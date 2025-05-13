@@ -55,14 +55,8 @@ class OutAggregate(nn.Module):
                 t += 1
             aggregation_mask = torch.unique(adj, dim=1)
         
-        print(aggregation_mask)
-        print(aggregation_mask.max())
-        print(aggregation_mask.min())
-        print(torch.isnan(aggregation_mask).any())
-        print(bboxes)
-        aggregated_bboxes = (aggregation_mask @ bboxes) / torch.sum(aggregation_mask, -1, keepdim=True)
-        print(aggregated_bboxes)
-        aggregated_prob = (aggregation_mask @ prob) / torch.sum(aggregation_mask, -1, keepdim=True)
+        aggregated_bboxes = (aggregation_mask @ bboxes) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
+        aggregated_prob = (aggregation_mask @ prob) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
         aggregated_logits = torch.special.logit(aggregated_prob, eps=1e-6)
 
         return aggregated_bboxes, aggregated_logits, aggregation_mask
