@@ -67,3 +67,4 @@ class OutAggregate(nn.Module):
 
         return aggregated_bboxes, aggregated_logits, aggregation_mask
         
+
