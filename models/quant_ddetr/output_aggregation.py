@@ -39,6 +39,7 @@ class OutAggregate(nn.Module):
         self.t_c = t_c
 
     def forward(self, bboxes, logits):
+        prob = logits.sigmoid()
         with torch.no_grad():
             n_q = bboxes.shape[1]
             iou_matrix = []
@@ -50,7 +51,8 @@ class OutAggregate(nn.Module):
             iou_matrix = torch.stack(iou_matrix)
             iou_matrix_gt_threshold = iou_matrix > self.t_b
 
-            kl_div_matrix = torch.kl_div(prob.unsqueeze(-1), prob)
+            kl_div_matrix = torch.nn.functional.kl_div(prob.unsqueeze(2), prob.unsqueeze(1), reduction='none')
+            kl_div_matrix = kl_div_matrix.mean(-1)
             print(f"kl_div_matrix:\n{kl_div_matrix}")
             print(kl_div_matrix.shape)
             kl_div_matrix_lt_threshold = kl_div_matrix < self.t_c
@@ -59,20 +61,19 @@ class OutAggregate(nn.Module):
             aggregation_mask = aggregation_mask | aggregation_mask.T # to ensure mask is symmetric
 
             # calculate the transitive closure 
-            adj = aggregation_mask.astype(torch.uint8)
+            adj = aggregation_mask.to(torch.float32)
             t = 0
             while t < n_q:
-                new_adj = ((adj + adj @ adj) > 0).astype(torch.uint8)
+                new_adj = ((adj + torch.matmul(adj,adj)) > 1e-6).to(torch.float32)
                 if torch.all(new_adj==adj):
                     break
                 adj = new_adj
                 t += 1
-            aggregation_mask = torch.unique(adj, dim=1).astype(torch.float32)
+            aggregation_mask = torch.unique(adj, dim=1)
             print(f"aggregation_mask:\n{aggregation_mask}")
             print(aggregation_mask.shape)
         
         aggregated_bboxes = (aggregation_mask @ bboxes) / torch.sum(aggregation_mask, -1, keepdim=True)
-        prob = logits.sigmoid()
         aggregated_prob = (aggregation_mask @ prob) / torch.sum(aggregation_mask, -1, keepdim=True)
         aggregated_logits = torch.special.logit(aggregated_prob, eps=1e-6)
 

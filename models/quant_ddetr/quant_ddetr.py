@@ -298,6 +298,7 @@ class DeformableDETR(nn.Module):
 
         # Output Aggregation
         aggregated_coords, aggregated_classes = self.aggregate(outputs_coords_one2one[-1], outputs_classes_one2one[-1])
+        raise KeyboardInterrupt()
 
         out = {
             "pred_logits": aggregated_classes,
