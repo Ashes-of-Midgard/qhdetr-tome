@@ -297,12 +297,12 @@ class DeformableDETR(nn.Module):
         outputs_coords_one2many = torch.stack(outputs_coords_one2many)
 
         # Output Aggregation
-        aggregated_coords, aggregated_classes = self.aggregate(outputs_coords_one2one[-1], outputs_classes_one2one[-1])
-        raise KeyboardInterrupt()
+        aggregated_coords, aggregated_classes, aggregation_mask = self.aggregate(outputs_coords_one2one[-1], outputs_classes_one2one[-1])
 
         out = {
             "pred_logits": aggregated_classes,
             "pred_boxes": aggregated_coords,
+            "aggregation_mask": aggregation_mask,
             "pred_logits_one2many": outputs_classes_one2many,
             "pred_boxes_one2many": outputs_coords_one2many,
         }
