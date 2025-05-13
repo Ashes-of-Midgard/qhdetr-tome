@@ -303,8 +303,8 @@ class DeformableDETR(nn.Module):
             "pred_logits": aggregated_classes,
             "pred_boxes": aggregated_coords,
             "aggregation_mask": aggregation_mask,
-            "pred_logits_one2many": outputs_classes_one2many,
-            "pred_boxes_one2many": outputs_coords_one2many,
+            "pred_logits_one2many": outputs_classes_one2many[-1],
+            "pred_boxes_one2many": outputs_coords_one2many[-1],
         }
 
         if self.aux_loss:
