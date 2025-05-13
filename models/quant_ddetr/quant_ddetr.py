@@ -297,21 +297,13 @@ class DeformableDETR(nn.Module):
         outputs_coords_one2many = torch.stack(outputs_coords_one2many)
 
         # Output Aggregation
-        ori_coords = torch.concat([outputs_coords_one2one[-1], outputs_coords_one2many[-1]], dim=1)
-        ori_classes = torch.concat([outputs_classes_one2one[-1], outputs_classes_one2many[-1]], dim=1)
-        aggregated_coords, aggregated_classes = self.aggregate(ori_coords, ori_classes)
-        # outputs_classes_one2one = [outputs_classes_one2one[i] for i in range(len(outputs_classes_one2one))]
-        # outputs_coords_one2one = [outputs_coords_one2one[i] for i in range(len(outputs_coords_one2one))]
-        # outputs_classes_one2one[-1] = aggregated_classes[:, 0:self.num_queries_one2one]
-        # outputs_coords_one2one[-1] = aggregated_coords[:, 0:self.num_queries_one2one]
-        # outputs_classes_one2one = torch.stack(outputs_classes_one2one)
-        # outputs_coords_one2one = torch.stack(outputs_coords_one2one)
+        aggregated_coords, aggregated_classes = self.aggregate(outputs_coords_one2one[-1], outputs_classes_one2one[-1])
 
         out = {
-            "pred_logits": aggregated_classes[:, 0:self.num_queries_one2one],
-            "pred_boxes": aggregated_coords[:, 0:self.num_queries_one2one],
-            "pred_logits_one2many": aggregated_classes[:, self.num_queries_one2one:],
-            "pred_boxes_one2many": aggregated_coords[:, self.num_queries_one2one:],
+            "pred_logits": aggregated_classes,
+            "pred_boxes": aggregated_coords,
+            "pred_logits_one2many": outputs_classes_one2many,
+            "pred_boxes_one2many": outputs_coords_one2many,
         }
 
         if self.aux_loss:

@@ -32,10 +32,11 @@ def masked_kl_divergence(pred_logits: torch.Tensor, mask: torch.tensor) -> torch
 
 
 class OutAggregate(nn.Module):
-    def __init__(self, num_classes, t_b=0.9):
+    def __init__(self, num_classes, t_b=0.9, t_c=0.2):
         super().__init__()
         self.num_classes = num_classes
         self.t_b = t_b
+        self.t_c = t_c
 
     def forward(self, bboxes, logits):
         with torch.no_grad():
@@ -48,13 +49,32 @@ class OutAggregate(nn.Module):
                 ))
             iou_matrix = torch.stack(iou_matrix)
             iou_matrix_gt_threshold = iou_matrix > self.t_b
-            upper_triangle_mask = (torch.arange(n_q).unsqueeze(0) > torch.arange(n_q).unsqueeze(1)).unsqueeze(0).to(iou_matrix_gt_threshold.device)
-            aggregation_mask = upper_triangle_mask * iou_matrix_gt_threshold
-            for i in range(n_q):
-                aggregation_mask = (~aggregation_mask[:, i, :].unsqueeze(2)) * aggregation_mask
-            eye = torch.eye(n_q, dtype=torch.bool, device=aggregation_mask.device).unsqueeze(0)
-            aggregation_mask = (aggregation_mask + eye).to(torch.float32)
+
+            kl_div_matrix = torch.kl_div(prob.unsqueeze(-1), prob)
+            print(f"kl_div_matrix:\n{kl_div_matrix}")
+            print(kl_div_matrix.shape)
+            kl_div_matrix_lt_threshold = kl_div_matrix < self.t_c
+            
+            aggregation_mask = iou_matrix_gt_threshold & kl_div_matrix_lt_threshold
+            aggregation_mask = aggregation_mask | aggregation_mask.T # to ensure mask is symmetric
+
+            # calculate the transitive closure 
+            adj = aggregation_mask.astype(torch.uint8)
+            t = 0
+            while t < n_q:
+                new_adj = ((adj + adj @ adj) > 0).astype(torch.uint8)
+                if torch.all(new_adj==adj):
+                    break
+                adj = new_adj
+                t += 1
+            aggregation_mask = torch.unique(adj, dim=1).astype(torch.float32)
+            print(f"aggregation_mask:\n{aggregation_mask}")
+            print(aggregation_mask.shape)
         
         aggregated_bboxes = (aggregation_mask @ bboxes) / torch.sum(aggregation_mask, -1, keepdim=True)
-        return aggregated_bboxes, logits
+        prob = logits.sigmoid()
+        aggregated_prob = (aggregation_mask @ prob) / torch.sum(aggregation_mask, -1, keepdim=True)
+        aggregated_logits = torch.special.logit(aggregated_prob, eps=1e-6)
+
+        return aggregated_bboxes, aggregated_logits
         
