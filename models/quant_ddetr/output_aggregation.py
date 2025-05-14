@@ -53,7 +53,7 @@ class OutAggregate(nn.Module):
                     break
                 adj = new_adj
                 t += 1
-            # aggregation_mask = torch.unique(adj, dim=1)
+            aggregation_mask = adj
 
         aggregated_bboxes = (aggregation_mask @ bboxes) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
         # aggregated_prob = (aggregation_mask @ prob) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
