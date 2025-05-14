@@ -301,6 +301,8 @@ class DeformableDETR(nn.Module):
         out = {
             "pred_logits": aggregated_classes,
             "pred_boxes": aggregated_coords,
+            "pred_logits_unaggregated": outputs_classes_one2one[-1],
+            "pred_boxes_unaggregated": outputs_coords_one2one[-1],
             "aggregation_mask": aggregation_mask,
             "pred_logits_one2many": outputs_classes_one2many[-1],
             "pred_boxes_one2many": outputs_coords_one2many[-1],
@@ -579,6 +581,36 @@ class SetCriterion(nn.Module):
         return losses
 
 
+def aggregate_bboxes(aggregation_mask, out_bbox_unaggregated):
+    """
+    将未聚合的检测框坐标按聚合掩码分组
+    Args:
+        aggregation_mask: 聚合掩码 [1, n, 300] (bool类型)
+        out_bbox_unaggregated: 未聚合的检测框坐标 [1, 300, 4]
+    Returns:
+        nested_list: 嵌套列表结构 [[[cluster1_boxes], [cluster2_boxes], ...]]
+    """
+    # 确保数据类型正确
+    if not aggregation_mask.dtype == torch.bool:
+        aggregation_mask = (aggregation_mask > 1e-6)
+    
+    # 为每个聚类生成坐标列表
+    clustered_bboxes_batch = []
+    for batch_id in range(len(aggregation_mask)):
+        clustered_bboxes = []
+        for cluster_mask in aggregation_mask[batch_id]:
+            # 获取当前聚类对应的bbox索引
+            cluster_indices = cluster_mask.nonzero(as_tuple=True)[0]
+            # 提取对应bbox并转为numpy数组
+            # raise KeyboardInterrupt()
+            cluster_boxes = out_bbox_unaggregated[batch_id][cluster_indices]
+            clustered_bboxes.append(cluster_boxes)
+        clustered_bboxes_batch.append(clustered_bboxes)
+
+    # 包装成要求的嵌套结构
+    return clustered_bboxes_batch
+
+
 class PostProcess(nn.Module):
     """ This module converts the model's output into the format expected by the coco api"""
 
@@ -597,6 +629,9 @@ class PostProcess(nn.Module):
                           For visualization, this should be the image size after data augment, but before padding
         """
         out_logits, out_bbox = outputs["pred_logits"], outputs["pred_boxes"]
+        out_logits_unaggregated, out_bbox_unaggregated = outputs["pred_logits_unaggregated"], outputs["pred_boxes_unaggregated"]
+        num_boxes = out_bbox.shape[1]
+        aggregation_mask = outputs["aggregation_mask"]
 
         assert len(out_logits) == len(target_sizes)
         assert target_sizes.shape[1] == 2
@@ -609,16 +644,20 @@ class PostProcess(nn.Module):
         topk_boxes = topk_indexes // out_logits.shape[2]
         labels = topk_indexes % out_logits.shape[2]
         boxes = box_ops.box_cxcywh_to_xyxy(out_bbox)
-        boxes = torch.gather(boxes, 1, topk_boxes.unsqueeze(-1).repeat(1, 1, 4))
-
+        boxes_unaggregated = box_ops.box_cxcywh_to_xyxy(out_bbox_unaggregated)
         # and from relative [0, 1] to absolute [0, height] coordinates
         img_h, img_w = target_sizes.unbind(1)
         scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
         boxes = boxes * scale_fct[:, None, :]
+        boxes_unaggregated = boxes_unaggregated * scale_fct[:, None, :]
+
+        boxes = torch.gather(boxes, 1, topk_boxes.unsqueeze(-1).repeat(1, 1, 4))
+        aggregation_mask = torch.gather(aggregation_mask, 1, topk_boxes.unsqueeze(-1).repeat(1, 1, num_boxes))
+        clustered_bboxes = aggregate_bboxes(aggregation_mask, boxes_unaggregated)
 
         results = [
-            {"scores": s, "labels": l, "boxes": b}
-            for s, l, b in zip(scores, labels, boxes)
+            {"scores": s, "labels": l, "boxes": b, "clustered_boxes": cb}
+            for s, l, b, cb in zip(scores, labels, boxes, clustered_bboxes)
         ]
 
         return results

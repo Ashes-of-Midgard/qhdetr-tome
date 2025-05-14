@@ -18,11 +18,9 @@ from util import box_ops
 
 
 class OutAggregate(nn.Module):
-    def __init__(self, num_classes, t_b=0.9, t_c=12):
+    def __init__(self, num_classes):
         super().__init__()
         self.num_classes = num_classes
-        self.t_b = t_b
-        self.t_c = t_c
 
     def forward(self, bboxes, logits):
         # prob = logits.sigmoid()
@@ -36,7 +34,7 @@ class OutAggregate(nn.Module):
                     box_ops.box_cxcywh_to_xyxy(bboxes[i])
                 ))
             iou_matrix = torch.stack(iou_matrix)
-            iou_matrix_gt_threshold = iou_matrix > self.t_b
+            iou_matrix_gt_threshold = iou_matrix > 0.9
 
             # sbce_matrix = symmetric_bce(prob.unsqueeze(2), prob.unsqueeze(1))
             # sbce_matrix_lt_threshold = sbce_matrix < self.t_c

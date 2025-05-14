@@ -18,12 +18,15 @@ import copy
 import wandb
 import torch
 from torch.nn import functional as F
+import torchvision.transforms as TcT
 import util.misc as utils
 from datasets.coco_eval import CocoEvaluator
 from datasets.panoptic_eval import PanopticEvaluator
 from datasets.data_prefetcher import data_prefetcher
 import pdb
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 scaler = torch.cuda.amp.GradScaler()
 def lamda_scheduler(start_warmup_value, base_value, epochs, niter_per_ep, warmup_epochs=5):
@@ -276,6 +279,7 @@ def evaluate(
             output_dir=os.path.join(output_dir, "panoptic_eval"),
         )
 
+    t=0
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -303,6 +307,25 @@ def evaluate(
 
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors["bbox"](outputs, orig_target_sizes)
+
+        # visualization
+        if t % 100 == 0:
+            # draw fig
+            for batch, _result in enumerate(results):
+                image = samples.tensors[batch]
+                b = _result["boxes"]
+                cb = _result["clustered_boxes"]
+                cb_all = torch.concat(cb)
+                draw_boxes_on_image(pil_transform_back(image), b.cpu(), bbox1_c="red", save_path=f"exps/vis/{t}_aggregated.png")
+                draw_boxes_on_image(pil_transform_back(image), cb_all.cpu(), bbox1_c="cyan", save_path=f"exps/vis/{t}_unaggregated.png")
+                draw_boxes_on_image(pil_transform_back(image), b.cpu(), cb_all.cpu(), save_path=f"exps/vis/{t}_all.png")
+                for i in range(10):
+                    # draw_boxes_on_image(pil_transform_back(image), boxes_gt[batch], bbox1_c="g", save_path=f"exps/vis/{t}_gt.png")
+                    draw_boxes_on_image(pil_transform_back(image), b[i].unsqueeze(0).cpu(), bbox1_c="red", save_path=f"exps/vis/{t}_{i}_aggregated.png")
+                    draw_boxes_on_image(pil_transform_back(image), cb[i].cpu(), bbox1_c="cyan", save_path=f"exps/vis/{t}_{i}_unaggregated.png")
+                    draw_boxes_on_image(pil_transform_back(image), b[i].unsqueeze(0).cpu(), cb[i].cpu(), save_path=f"exps/vis/{t}_{i}_all.png")
+        t += 1
+
         if "segm" in postprocessors.keys():
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors["segm"](
@@ -368,3 +391,90 @@ def evaluate(
         model.transformer.two_stage_num_proposals = save_two_stage_num_proposals
 
     return stats, coco_evaluator
+
+
+# visualization
+def unnormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """
+    对经过归一化的张量进行反归一化操作。
+
+    Args:
+        tensor (torch.Tensor): 要反归一化的张量，形状为 (C, H, W)。
+        mean (list): 归一化时使用的均值，默认为 [0.485, 0.456, 0.406]。
+        std (list): 归一化时使用的标准差，默认为 [0.229, 0.224, 0.225]。
+
+    Returns:
+        torch.Tensor: 反归一化后的张量。
+    """
+    mean = torch.tensor(mean, dtype=tensor.dtype, device=tensor.device)
+    std = torch.tensor(std, dtype=tensor.dtype, device=tensor.device)
+
+    tensor = tensor * std.view(-1, 1, 1)
+    tensor = tensor + mean.view(-1, 1, 1)
+
+    return tensor
+
+
+def pil_transform_back(image_tensor, resize=1280):
+    """
+    将经过ToTensor和Normalize变换后的张量转换回PIL图像。
+
+    Args:
+        image_tensor (torch.Tensor): 经过变换的图像张量，形状为 (C, H, W)。
+
+    Returns:
+        PIL.Image.Image: 恢复后的PIL图像。
+    """
+    unnormalized_tensor = unnormalize(image_tensor)
+
+    # 将张量的值范围从 [0, 1] 转换到 [0, 255] 并转换为无符号8位整数类型
+    pil_image = TcT.Resize(resize)(TcT.ToPILImage()(unnormalized_tensor.clamp(0, 1).mul(255).byte()))
+
+    return pil_image
+
+
+def draw_boxes_on_image(image, pred_bbox1=None, pred_bbox2=None, bbox1_c="cyan", bbox2_c="red", save_path=".draw_image.png"):
+    """
+    将给定的两个不同的边界框序列分别用不同颜色绘制到图像上，并保存到指定位置。
+
+    Args:
+        image (PIL.Image.Image): 要绘制边界框的PIL图像。
+        pred_bbox1 (torch.Tensor): 第一个预测的边界框张量，形状为 [n_q, 4]，格式为 [x, y, w, h]，数值在 (0, 1) 表示图像尺寸的百分比。
+        pred_bbox2 (torch.Tensor): 第二个预测的边界框张量，形状为 [n_q, 4]，格式为 [x, y, w, h]，数值在 (0, 1) 表示图像尺寸的百分比。
+        save_path (str): 保存绘制好边界框图像的本地路径。
+
+    Returns:
+        None
+    """
+    fig, ax = plt.subplots(1)
+    ax.imshow(image)
+
+    width, height = image.size
+
+    # 绘制第一个方框序列，用红色
+    if pred_bbox1 is not None:
+        for box in pred_bbox1:
+            x_1, y_1, x_2, y_2 = box.tolist()
+            x_pixel = int((x_1+x_2)/2)
+            y_pixel = int((y_1+y_2)/2)
+            w_pixel = int((x_2-x_1)/2)
+            h_pixel = int((y_2-y_1)/2)
+            rect = patches.Rectangle((x_pixel-w_pixel, y_pixel-h_pixel), 2*w_pixel, 2*h_pixel, linewidth=1, edgecolor=bbox1_c, facecolor='none')
+            ax.add_patch(rect)
+
+    # 绘制第二个方框序列，用蓝色
+    if pred_bbox2 is not None:
+        for box in pred_bbox2:
+            x_1, y_1, x_2, y_2 = box.tolist()
+            x_pixel = int((x_1+x_2)/2)
+            y_pixel = int((y_1+y_2)/2)
+            w_pixel = int((x_2-x_1)/2)
+            h_pixel = int((y_2-y_1)/2)
+            rect = patches.Rectangle((x_pixel-w_pixel, y_pixel-h_pixel), 2*w_pixel, 2*h_pixel, linewidth=1, edgecolor=bbox2_c, facecolor='none')
+            ax.add_patch(rect)
+
+    plt.axis('off')
+
+    # 保存图像到指定路径
+    plt.savefig(save_path)
+    plt.close()
