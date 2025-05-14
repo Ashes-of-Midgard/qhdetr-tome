@@ -298,7 +298,6 @@ class DeformableDETR(nn.Module):
 
         # Output Aggregation
         aggregated_coords, aggregated_classes, aggregation_mask = self.aggregate(outputs_coords_one2one[-1], outputs_classes_one2one[-1])
-
         out = {
             "pred_logits": aggregated_classes,
             "pred_boxes": aggregated_coords,

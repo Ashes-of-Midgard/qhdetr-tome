@@ -9,13 +9,12 @@ import matplotlib.pyplot as plt
 from util import box_ops
 
 
-def symmetric_cross_entropy(p, q, epsilon=1e-8):
-    q = q + epsilon
-    p = p + epsilon
-    ce_pq = (-p * q.log()).sum(dim=-1)
-    ce_qp = (-q * p.log()).sum(dim=-1)
-    sce = ce_pq + ce_qp
-    return sce
+# def symmetric_bce(p, q, eps=1e-8):
+#     p = torch.clamp(p, eps, 1-eps) # avoid log(0)
+#     q = torch.clamp(q, eps, 1-eps)
+#     term1 = -p * torch.log(q) - (1-p) * torch.log(1-q)
+#     term2 = -q * torch.log(p) - (1-q) * torch.log(1-p)
+#     return (term1 + term2).sum(dim=-1)
 
 
 class OutAggregate(nn.Module):
@@ -26,9 +25,10 @@ class OutAggregate(nn.Module):
         self.t_c = t_c
 
     def forward(self, bboxes, logits):
-        prob = logits.sigmoid()
+        # prob = logits.sigmoid()
         with torch.no_grad():
             n_q = bboxes.shape[1]
+            # print(n_q)
             iou_matrix = []
             for i in range(len(bboxes)):
                 iou_matrix.append(box_ops.generalized_box_iou(
@@ -38,10 +38,10 @@ class OutAggregate(nn.Module):
             iou_matrix = torch.stack(iou_matrix)
             iou_matrix_gt_threshold = iou_matrix > self.t_b
 
-            sce_matrix = symmetric_cross_entropy(prob.unsqueeze(2), prob.unsqueeze(1))
-            kl_div_matrix_lt_threshold = sce_matrix < self.t_c
+            # sbce_matrix = symmetric_bce(prob.unsqueeze(2), prob.unsqueeze(1))
+            # sbce_matrix_lt_threshold = sbce_matrix < self.t_c
             
-            aggregation_mask = iou_matrix_gt_threshold & kl_div_matrix_lt_threshold
+            aggregation_mask = iou_matrix_gt_threshold
             aggregation_mask = aggregation_mask | aggregation_mask.transpose(1, 2) # to ensure mask is symmetric
 
             # calculate the transitive closure 
@@ -53,12 +53,13 @@ class OutAggregate(nn.Module):
                     break
                 adj = new_adj
                 t += 1
-            aggregation_mask = torch.unique(adj, dim=1)
-        
-        aggregated_bboxes = (aggregation_mask @ bboxes) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
-        aggregated_prob = (aggregation_mask @ prob) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
-        aggregated_logits = torch.special.logit(aggregated_prob, eps=1e-6)
+            # aggregation_mask = torch.unique(adj, dim=1)
 
-        return aggregated_bboxes, aggregated_logits, aggregation_mask
+        aggregated_bboxes = (aggregation_mask @ bboxes) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
+        # aggregated_prob = (aggregation_mask @ prob) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
+        # aggregated_logits = torch.special.logit(aggregated_prob, eps=1e-6)
+        # aggregated_logits = (aggregation_mask @ logits) / (torch.sum(aggregation_mask, -1, keepdim=True) + 1e-6)
+
+        return aggregated_bboxes, logits, aggregation_mask
         
 
