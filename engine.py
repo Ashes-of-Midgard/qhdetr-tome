@@ -350,6 +350,10 @@ def evaluate(
 
             panoptic_evaluator.update(res_pano)
 
+    iou_aggregated = torch.mean(criterion.iou_aggregated)
+    iou_unaggregated = torch.mean(criterion.iou_unaggregated)
+    print(iou_aggregated)
+    print(iou_unaggregated)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
