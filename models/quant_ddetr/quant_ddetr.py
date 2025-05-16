@@ -525,27 +525,28 @@ class SetCriterion(nn.Module):
         # Retrieve the matching between the outputs of the last layer and the targets
         indices = self.matcher(outputs_without_aux, targets)
         # Ablations
-        for batch_id in range(len(indices)):
-            selected_indices, ground_truth_indices = indices[batch_id]
-            ground_truth_boxes = targets[batch_id]['boxes'][ground_truth_indices]
-            # unaggregated_boxes = outputs["pred_boxes_unaggregated"][batch_id][selected_indices]
-            aggregated_boxes = outputs["pred_boxes"][batch_id][selected_indices]
-            aggregation_mask = outputs["aggregation_mask"][batch_id][selected_indices]
-            for id in range(aggregation_mask.shape[0]):
-                aggregated_indices = torch.nonzero(aggregation_mask[id], as_tuple=True)[0]
-                unaggregated_boxes = outputs["pred_boxes_unaggregated"][batch_id][aggregated_indices]
-                aggregated_box = aggregated_boxes[id]
-                ground_truth_box = ground_truth_boxes[id]
-                iou_aggregated = box_ops.generalized_box_iou(
-                    box_ops.box_cxcywh_to_xyxy(aggregated_box.unsqueeze(0)),
-                    box_ops.box_cxcywh_to_xyxy(ground_truth_box.unsqueeze(0)),
-                ).mean()
-                iou_unaggregated = box_ops.generalized_box_iou(
-                    box_ops.box_cxcywh_to_xyxy(unaggregated_boxes),
-                    box_ops.box_cxcywh_to_xyxy(ground_truth_box.unsqueeze(0)),
-                ).mean()
-            self.iou_unaggregated.append(iou_unaggregated)
-            self.iou_aggregated.append(iou_aggregated)
+        if "aggregation_mask" in outputs.keys():
+            for batch_id in range(len(indices)):
+                selected_indices, ground_truth_indices = indices[batch_id]
+                ground_truth_boxes = targets[batch_id]['boxes'][ground_truth_indices]
+                # unaggregated_boxes = outputs["pred_boxes_unaggregated"][batch_id][selected_indices]
+                aggregated_boxes = outputs["pred_boxes"][batch_id][selected_indices]
+                aggregation_mask = outputs["aggregation_mask"][batch_id][selected_indices]
+                for id in range(aggregation_mask.shape[0]):
+                    aggregated_indices = torch.nonzero(aggregation_mask[id], as_tuple=True)[0]
+                    unaggregated_boxes = outputs["pred_boxes_unaggregated"][batch_id][aggregated_indices]
+                    aggregated_box = aggregated_boxes[id]
+                    ground_truth_box = ground_truth_boxes[id]
+                    iou_aggregated = box_ops.generalized_box_iou(
+                        box_ops.box_cxcywh_to_xyxy(aggregated_box.unsqueeze(0)),
+                        box_ops.box_cxcywh_to_xyxy(ground_truth_box.unsqueeze(0)),
+                    ).mean()
+                    iou_unaggregated = box_ops.generalized_box_iou(
+                        box_ops.box_cxcywh_to_xyxy(unaggregated_boxes),
+                        box_ops.box_cxcywh_to_xyxy(ground_truth_box.unsqueeze(0)),
+                    ).mean()
+                    self.iou_unaggregated.append(iou_unaggregated)
+                    self.iou_aggregated.append(iou_aggregated)
 
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
